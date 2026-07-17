@@ -58,6 +58,13 @@ for label, p in files:
         all_sheets[s] = data
         print(' sheet', s, 'rows', last_row, 'cols', last_col)
 
+# Patch: don't show default Network manpower cost when no project data is entered
+es = all_sheets.get('Estimate Sheet')
+if es and len(es) > 79:
+    # row 80, column G (index 6) is the Network Team Resource quantity
+    if es[79][6] == 0.2:
+        es[79][6] = "=IF(OR('Test Fit'!E4>0,'Test Fit'!E5>0),0.2,0)"
+
 out_path = os.path.join(os.path.dirname(__file__), 'workbook.json')
 with open(out_path, 'w', encoding='utf-8') as f:
     json.dump(all_sheets, f, indent=None, separators=(',', ':'))
