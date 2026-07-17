@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+import { jsPDF } from "jspdf";
+import autoTable from "jspdf-autotable";
 import { HyperFormula, type CellValue, type DetailedCellError } from "hyperformula";
 
 interface FieldDef {
@@ -112,6 +114,20 @@ const fmtCurrency = (v: CellValue) =>
 const fmtNumber = (v: CellValue) =>
   new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(safeNum(v));
 
+const loadImageAsBase64 = async (url: string): Promise<string> => {
+  const res = await fetch(url);
+  const blob = await res.blob();
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      if (typeof reader.result === "string") resolve(reader.result);
+      else reject(new Error("Failed to read image"));
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+};
+
 const SKIP_DESCRIPTIONS = [
   "Description",
   "Sub Total",
@@ -221,6 +237,65 @@ function App() {
         }
       }
     }
+  };
+
+  const exportPDF = async () => {
+    if (!summary) return;
+    const doc = new jsPDF({ unit: "mm", format: "a4" });
+    const logoBase64 = await loadImageAsBase64("/questant_logo_header.png");
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const logoWidth = 80;
+    const logoHeight = logoWidth * (265 / 800);
+    const x = (pageWidth - logoWidth) / 2;
+    doc.addImage(logoBase64, "PNG", x, 10, logoWidth, logoHeight);
+
+    doc.setFontSize(16);
+    doc.text("Technology Estimate", pageWidth / 2, 10 + logoHeight + 12, {
+      align: "center",
+    });
+
+    autoTable(doc, {
+      startY: 10 + logoHeight + 18,
+      head: [["Category", "Budget", "$/SqFt", "$/Head"]],
+      body: summary.rows.map((r) => [
+        r.label,
+        fmtCurrency(r.budget),
+        fmtCurrency(r.sqft),
+        fmtCurrency(r.head),
+      ]),
+    });
+
+    const finalY = (doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable
+      ?.finalY ?? 80;
+
+    doc.setFontSize(12);
+    doc.text(`Cap Total: ${fmtCurrency(summary.capTotal)}`, 14, finalY + 10);
+    doc.text(`Non-Cap Total: ${fmtCurrency(summary.nonCapTotal)}`, 14, finalY + 18);
+    doc.text(`Project Total: ${fmtCurrency(summary.projectTotal)}`, 14, finalY + 26);
+
+    autoTable(doc, {
+      startY: finalY + 34,
+      head: [["Cost Code", "Category", "Description", "Qty", "Unit Cost", "Cash Value"]],
+      body: details.map((r) => [
+        r.code,
+        r.type,
+        r.desc,
+        fmtNumber(r.qty),
+        fmtCurrency(r.unit),
+        fmtCurrency(r.cash),
+      ]),
+      styles: { fontSize: 8, cellPadding: 1.5 },
+      columnStyles: {
+        0: { cellWidth: 22 },
+        1: { cellWidth: 28 },
+        2: { cellWidth: "auto" },
+        3: { cellWidth: 15, halign: "right" },
+        4: { cellWidth: 25, halign: "right" },
+        5: { cellWidth: 25, halign: "right" },
+      },
+    });
+
+    doc.save("technology_estimate.pdf");
   };
 
   const exportCSV = () => {
@@ -359,12 +434,20 @@ function App() {
             <div className="bg-white rounded-xl shadow p-4">
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-lg font-semibold">Detailed Line Items</h2>
-                <button
-                  onClick={exportCSV}
-                  className="bg-blue-600 text-white text-sm px-3 py-1.5 rounded hover:bg-blue-700"
-                >
-                  Export CSV
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={exportCSV}
+                    className="bg-slate-200 text-slate-800 text-sm px-3 py-1.5 rounded hover:bg-slate-300"
+                  >
+                    Export CSV
+                  </button>
+                  <button
+                    onClick={() => exportPDF().catch(console.error)}
+                    className="bg-blue-600 text-white text-sm px-3 py-1.5 rounded hover:bg-blue-700"
+                  >
+                    Export PDF
+                  </button>
+                </div>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
